@@ -10,8 +10,8 @@ services:
       - .:/app
       - app-data:/app/data
     environment:
-      - OPENWEATHER_API_KEY=e31a1b552615cfa104798b72be288c19
-      - SECRET_KEY=edd740cac70ea072c01f42402ab1bb67e643fcab071d4298424b74e6cc4b3056
+      - OPENWEATHER_API_KEY=redacted
+      - SECRET_KEY=redacted
     depends_on:
       - db
     restart: unless-stopped
