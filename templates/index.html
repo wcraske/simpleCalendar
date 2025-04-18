@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Calendar</title>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+        }
+        .week-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            height: 100vh;
+        }
+        .day-column {
+            border-left: 1px solid black;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        .day-column:first-child {
+            border-left: none;
+        }
+        .day-label {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div x-data="eventApp()" x-init="init()">
+        <button @click="toggleAuth" style="position: absolute; top: 10px; right: 10px;" x-text="isAuthenticated ? 'Logout' : 'Login/Register'"></button>
+
+        <!-- Floating Add Button -->
+        <button 
+            x-show="isAuthenticated" 
+            @click="showAddEvent = true" 
+            style="position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; border-radius: 50%; font-size: 24px; color: black; cursor: pointer;">
+            +
+        </button>
+
+        <!-- Popup Form -->
+        <div 
+        x-show="showAddEvent" 
+        style="position: fixed; bottom: 80px; right: 20px;">
+            <div style="background: white; padding: 20px; border-radius: 8px; width: 300px;">
+                <h2>Add Event</h2>
+                <form @submit.prevent="addEvent">
+                    <input type="text" placeholder="Event Name" x-model="newEvent.name" required style="display: block; width: 100%; margin-bottom: 8px;">
+                    <input type="text" placeholder="Description" x-model="newEvent.description" style="display: block; width: 100%; margin-bottom: 8px;">
+                    <input type="datetime-local" x-model="newEvent.start_date" required style="display: block; width: 100%; margin-bottom: 8px;">
+                    <input type="datetime-local" x-model="newEvent.end_date" required style="display: block; width: 100%; margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <button type="submit">Add</button>
+                        <button type="button" @click="showAddEvent = false">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="week-grid">
+            <template x-for="(day, index) in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']">
+                <div class="day-column">
+                    <div class="day-label" x-text="day"></div>
+                    <!-- Show weather only for the current day -->
+                    <div x-show="(new Date().getDay() === (index + 1) % 7)" style="margin-bottom: 8px;">
+                        <em x-text="weatherToday || 'Loading weather...'"></em>
+                    </div>
+                    <ul>
+                        <template x-for="event in events.filter(e => new Date(e.start_date).getDay() === (index + 1) % 7)">
+                            <li>
+                                <strong x-text="event.name"></strong> - <span x-text="event.description"></span>
+                                <br>
+                                <small>From: <span x-text="formatDate(event.start_date)"></span></small><br>
+                                <small>To: <span x-text="formatDate(event.end_date)"></span></small>
+                                <br>
+                                <button @click="deleteEvent(event.id)" x-show="isAuthenticated">Delete</button>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <script>
+        function eventApp() {
+            return {
+                events: [],
+                newEvent: {
+                    name: '',
+                    description: '',
+                    start_date: '',
+                    end_date: ''
+                },
+                isAuthenticated: false,
+                showAddEvent: false,
+                weatherToday: '',
+                notificationInterval: null,
+                notifiedEventIds: new Set(), // Track which events we've already notified about
+
+                async fetchEvents() {
+                    const token = localStorage.getItem('token');
+                    if (!token) return;
+
+                    const response = await fetch('/events/', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (response.ok) {
+                        this.events = await response.json();
+                        this.checkUpcomingEvents(); // Check for upcoming events whenever we fetch
+                    } else if (response.status === 401) {
+                        localStorage.removeItem('token');
+                        this.isAuthenticated = false;
+                        alert("Session expired. Please log in again.");
+                        window.location.href = '/auth';
+                    } else {
+                        console.error("Failed to get events");
+                    }
+                },
+
+                async fetchWeatherToday() {
+                    try {
+                        const response = await fetch(`/weather?city=Vancouver`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.weatherToday = (data.emoji || '') + ' ' + (data.temperature ? `${data.temperature}°C` : '') + ' ' + (data.description || 'No forecast');
+                        } else {
+                            this.weatherToday = "Weather unavailable";
+                        }
+                    } catch {
+                        this.weatherToday = "Weather unavailable";
+                    }
+                },
+
+                checkUpcomingEvents() {
+                    // Only process if notifications are supported and permission is granted
+                    if (!("Notification" in window) || Notification.permission !== "granted") {
+                        return;
+                    }
+                    
+                    const now = new Date();
+                    const thirtyMinutesLater = new Date(now.getTime() + 30 * 60000);
+                    
+                    // Find events that start within the next 30 minutes
+                    this.events.forEach(event => {
+                        const startTime = new Date(event.start_date);
+                        
+                        // Check if event starts within next 30 minutes but hasn't started yet
+                        if (startTime > now && startTime <= thirtyMinutesLater) {
+                            // Only notify once per event
+                            if (!this.notifiedEventIds.has(event.id)) {
+                                const minutesUntil = Math.floor((startTime - now) / (1000 * 60));
+                                
+                                // Send browser notification
+                                new Notification("Upcoming Event", {
+                                    body: `"${event.name}" starts in ${minutesUntil} minutes!`,
+                                    icon: '/static/favicon.ico' // Optional: add a favicon to your project for this
+                                });
+                                
+                                // Mark this event as notified
+                                this.notifiedEventIds.add(event.id);
+                            }
+                        }
+                    });
+                },
+
+                async addEvent() {
+                    if (!this.isAuthenticated) {
+                        alert("You must be logged in to add events.");
+                        return;
+                    }
+
+                    const token = localStorage.getItem('token');
+                    const response = await fetch('/events/', {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}` 
+                        },
+                        body: JSON.stringify(this.newEvent)
+                    });
+
+                    if (response.ok) {
+                        this.fetchEvents();
+                        this.newEvent = { name: '', description: '', start_date: '', end_date: '' };
+                        this.showAddEvent = false;
+                    } else {
+                        alert("Failed to add event. Make sure you are logged in.");
+                    }
+                },
+
+                async deleteEvent(id) {
+                    if (!this.isAuthenticated) {
+                        alert("You must be logged in to delete events.");
+                        return;
+                    }
+
+                    const token = localStorage.getItem('token');
+                    const response = await fetch(`/events/${id}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (response.ok) {
+                        this.fetchEvents(); 
+                    } else {
+                        alert("Failed to delete event.");
+                    }
+                },
+
+                checkAuth() {
+                    this.isAuthenticated = !!localStorage.getItem('token');
+                },
+
+                toggleAuth() {
+                    if (this.isAuthenticated) {
+                        localStorage.removeItem('token');
+                        this.isAuthenticated = false;
+                        window.location.reload();
+                    } else {
+                        window.location.href = '/auth';
+                    }
+                },
+
+                formatDate(dateString) {
+                    return new Date(dateString).toLocaleString();
+                },
+
+                requestNotificationPermission() {
+                    if (!("Notification" in window)) {
+                        console.log("This browser does not support notifications");
+                        return;
+                    }
+
+                    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+                        Notification.requestPermission();
+                    }
+                },
+
+                setupNotificationChecks() {
+                    this.notificationInterval = setInterval(() => {
+                        this.checkUpcomingEvents();
+                    }, 600000); 
+                },
+
+                init() {
+                    this.checkAuth();
+                    this.fetchEvents();
+                    this.fetchWeatherToday();
+                    
+                    if (this.isAuthenticated) {
+                        this.requestNotificationPermission();
+                        this.setupNotificationChecks();
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>

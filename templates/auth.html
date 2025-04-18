@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login & Register</title>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div x-data="authApp()" class="container">
+        <h1 x-text="isLogin ? 'Login' : 'Register'"></h1>
+        
+        <form @submit.prevent="isLogin ? login() : register()">
+            <input type="text" placeholder="Username" x-model="user.username" required>
+            <input type="password" placeholder="Password" x-model="user.password" required>
+            <button type="submit" x-text="isLogin ? 'Login' : 'Register'"></button>
+        </form>
+        
+        <p x-text="message" style="color: red;"></p>
+        
+        <button @click="isLogin = !isLogin" style="margin-top: 10px;">
+            <span x-text="isLogin ? 'Need an account? Register' : 'Already have an account? Login'"></span>
+        </button>
+    </div>
+
+    <script>
+        function authApp() {
+            return {
+                isLogin: true,
+                user: { username: '', password: '' },
+                message: '',
+                async login() {
+                    const response = await fetch('/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            username: this.user.username,
+                            password: this.user.password
+                        })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.access_token);
+                        window.location.href = '/';
+                    } else {
+                        this.message = 'Login failed';
+                    }
+                },
+                async register() {
+                    const response = await fetch('/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            username: this.user.username,
+                            password: this.user.password
+                        })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.access_token);
+                        window.location.href = '/';
+                    } else {
+                        this.message = 'Registration failed';
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>

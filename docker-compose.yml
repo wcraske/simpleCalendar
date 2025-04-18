@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: calendar-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - app-data:/app/data
+    environment:
+      - OPENWEATHER_API_KEY=e31a1b552615cfa104798b72be288c19
+      - SECRET_KEY=edd740cac70ea072c01f42402ab1bb67e643fcab071d4298424b74e6cc4b3056
+    depends_on:
+      - db
+    restart: unless-stopped
+    command: >
+      bash -c "uvicorn calendarProject:app --host 0.0.0.0 --port 8000 --reload"
+
+  db:
+    image: keinos/sqlite3:latest
+    container_name: calendar-db
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+
+volumes:
+  app-data:
